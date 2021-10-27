@@ -91,8 +91,26 @@ int main() {
             n = recvfrom(data_socket, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &data_addr, &len);
             buffer[n] = '\0'; 
             printf("Client : %s\n", buffer);
-        }
+            FILE *fp;
+            char str[64];
 
+            /* opening file for reading */
+            fp = fopen(buffer , "r"); // ouverture du fichier
+            if(fp == NULL) {
+                perror("Error opening file");
+                return(-1);
+            }
+            while( fgets(str, 64, fp)!=NULL ) { // fgets : str => la chaîne qui contient la chaine de caractère lu, 60 : nmbre max de caractère à lire, fr : stream d'où sont lus les chaînes
+                /* writing content to stdout */
+                //puts(str);
+                // on va écrire le texte vers le client 
+                sendto(data_socket, (const char *)str, strlen(str), MSG_CONFIRM, (const struct sockaddr *) &data_addr, len);
+                //bzero(str,sizeof(str));
+            }
+            strcpy(str,"EOF");
+            sendto(data_socket, (const char *)str, strlen(str), MSG_CONFIRM, (const struct sockaddr *) &data_addr, len);
+            fclose(fp);
+        }
         // n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
 	    // buffer[n] = '\0'; 
         // printf("Client : %s\n", buffer);
