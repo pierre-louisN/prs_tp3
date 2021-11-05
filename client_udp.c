@@ -55,10 +55,9 @@ int thw_client(int sockfd, struct sockaddr_in servaddr){
     printf("'%s'\n", ptr);
     if(strcmp(ptr,"SYN-ACK")==0){
         ptr = strtok(NULL, delim); // le serveur nous donne le numéro de port de sa nouvelle socket
-        //int socket_serv_data = atoi(ptr);
-        //printf("data socket port : %d\n", socket_serv_data);
+        //printf("data socket port : %d\n", atoi(ptr));
         message = "ACK"; // message de test
-        if(sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) > 0){
+        if(sendto(sockfd, (const char *)message, strlen(message), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr)) > 0){
             printf("ACK envoyé\n");
         }else{
             return 0;
@@ -73,6 +72,8 @@ int thw_client(int sockfd, struct sockaddr_in servaddr){
 void exchange_file(int port, int sockfd, struct sockaddr_in servaddr){
     int n, len;
 	char buffer[MAXLINE];
+	bzero(buffer,sizeof(buffer));
+	len = sizeof(servaddr);
 
 	// fin du three way handshake, on envoi des données sur le port de la socket data
 	char *filename = "bigfile.txt"; // nom du fichier qu'on souhaite avoir
@@ -80,20 +81,81 @@ void exchange_file(int port, int sockfd, struct sockaddr_in servaddr){
 	//printf("%d %s %d\n",socket_serv_data,inet_ntoa(servaddr.sin_addr),ntohs(servaddr.sin_port));
 	servaddr.sin_port = htons(port); // on peut utiliser la même socket mais il faut changer le port 
 	int n2 = sendto(sockfd, (const char *)filename, strlen(filename), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-	printf("filename envoyé %d\n",n2);
+	printf("filename envoyé \n");
 	//printf("contenu du fichier %s :\n", filename);
 
 	FILE *fp;
 
-	fp = fopen("output_file.txt", "w+");
-	recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr,&len);
-	while(strcmp(buffer,"EOF")==0){ // serveur nous envoi EOF pour nous signifier qu'il a fini, pas bon pour les perfs peut être car strcmp coûte du temps peut être
-		fputs(buffer, fp);
+	int ack = 1;
+	char buffer_file[1024];
+	bzero(buffer_file,sizeof(buffer_file));
+	fp = fopen("output_file.txt", "w");
+	n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr,&len);
+	//buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
+	//printf("Server : %s\n", buffer);
+	char ack_char[7];
+	while(strcmp(buffer,"EOF")!=0){ // serveur nous envoi EOF pour nous signifier qu'il a fini, pas bon pour les perfs peut être car strcmp coûte du temps peut être
+		//recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
+		//n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
+		
+		buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
+		
+		//printf("Server : %s\n", buffer);
+		char delim[] = "_";
+		char *seq_ptr = strtok(buffer, delim);
+		//printf("Serveur : '%s'\n", buffer);
+		int num_seq = atoi(seq_ptr);
+		printf("numéro de séquence reçu : %d\n", num_seq);
+		if(ack == 1 || num_seq==ack+1){
+			ack = num_seq;
+			//printf("ack : %d\n",ack);
+			sprintf(ack_char,"%6d",ack);
+			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+			
+		}
+		seq_ptr = strtok(NULL, delim);
+		fwrite(seq_ptr,1,n-(sizeof(ack_char)),fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
+		//fputs(buffer, fp);
+		//printf("buffer contient : %s\n",buffer_file);
+		//strcat(buffer_file,seq_ptr);
+		puts(seq_ptr);
 		bzero(buffer,sizeof(buffer)); // vide le buffer
-		recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
+		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
+		// char message[64];
+		// sprintf(message, "%d", message_number);
+		// int n2 = sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 	}
+	//fputs(buffer_file, fp);
+	//fwrite(buffer_file,1,1024,fp);
 	printf("Fichier reçu et crée\n");
 	fclose(fp);
+}
+
+void exchange_data(int port, int sockfd, struct sockaddr_in servaddr){
+	int n, len;
+	char buffer_data[MAXLINE];
+	//bzero(buffer_,sizeof(buffer)); 
+	len = sizeof(servaddr);
+	servaddr.sin_port = htons(port); // on peut utiliser la même socket mais il faut changer le port 
+	int message_number = 1;
+	while(1){
+		sleep(2);
+		char message[64];
+		sprintf(message, "%d", message_number);
+		int n2 = sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+		recvfrom(sockfd, (char *)buffer_data, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);	
+		char delim[] = "_";
+		char *ptr = strtok(buffer_data, delim);
+		printf("Serveur : '%s'\n", buffer_data);
+		if(strcmp(ptr,"	ACK")==0){
+			ptr = strtok(NULL, delim);
+			int num_ack = atoi(ptr);
+			printf("numéro de l'ACK reçu : %d\n", num_ack);
+			if(num_ack==message_number){
+				message_number++;
+			}
+		}
+	}
 }
 
 int main() {
@@ -104,6 +166,7 @@ int main() {
     int res_twh = thw_client(sockfd,servaddr);
     if(res_twh != 0){
         exchange_file(res_twh, sockfd, servaddr);
+		//exchange_data(res_twh,sockfd,servaddr);
     }
 	close(sockfd);
 	return 0;
