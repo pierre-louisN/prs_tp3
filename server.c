@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 
+
 #define PORT	 8080
 #define PORT2	 1234
 #define MAXLINE 1024
@@ -100,6 +101,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     strcpy(str,"EOF");
     sendto(data_socket, (const char *)str, strlen(str), MSG_CONFIRM, (const struct sockaddr *) &data_addr, len);
     fclose(fp);
+    close(data_socket);
     return 1;
 }
 
@@ -124,13 +126,13 @@ void handle_client(int data_socket, struct sockaddr_in data_addr){
 
 
 int twh_serv(int sockfd, struct sockaddr_in cliaddr){
-    printf("nv twh\n");
+    //printf("nv twh\n");
     int len, n;
     char buffer[MAXLINE];
 	len = sizeof(cliaddr);//taille de la structure qui mène vers le client
     n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
 	buffer[n] = '\0';
-	printf("Client : %s\n", buffer);
+	//printf("Client : %s\n", buffer);
     if((strcmp(buffer,"SYN")) == 0){ //si le client s'est bien connecté alors on crée la socket de données
         
         int data_socket; //on va créer la socket de donnée
@@ -161,7 +163,9 @@ int twh_serv(int sockfd, struct sockaddr_in cliaddr){
             //     close(sockfd);
             //     int ex = exchange_file(data_socket,data_addr); 
             //     if(ex==1){
-            //         return child_pid; // le fils return son pid pour que son père le tue
+            //         // printf("exh succes\n");
+            //         // return child_pid; // le fils return son pid pour que son père le tue
+            //         exit( EXIT_SUCCESS );
             //     }
             //     //handle_client(data_socket,data_addr);   
             // }
@@ -189,14 +193,6 @@ int main() {
         //printf(res_twh);
         if(res_twh == 1){
             printf("twh successful \n");
-        }
-        else if(res_twh == 0){
-            printf("error, twh unsuccessful\n");
-            //exit(EXIT_FAILURE);
-        }
-        else{
-            printf("file exchange successful \n");
-            kill(res_twh,SIGTERM); // le père tue le fils après qu'il ait finit de faire l'échange de fichier
         }
         // le fork est fait quand on fait la socket de données, le fils gère les données et le père acceptre les clients    
     }

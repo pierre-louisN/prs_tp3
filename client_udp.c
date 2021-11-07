@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <time.h>
 
 #define PORT	 8080 // numéro de port
 #define MAXLINE 1024 // taille max des message qu'on peut recevoir 
@@ -93,7 +94,10 @@ void exchange_file(int port, int sockfd, struct sockaddr_in servaddr){
 	n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr,&len);
 	//buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
 	//printf("Server : %s\n", buffer);
+	int nbre_octets = n; // on va compter le nombre d'octet qu'on reçoit pour calculer le débit
 	char ack_char[7];
+	clock_t before = clock(); // on va utiliser un timer pour calculer le débit en divisant le temps par le nombre de paquets
+	// clock returns the number of clock ticks elapsed since the start of the program.
 	while(strcmp(buffer,"EOF")!=0){ // serveur nous envoi EOF pour nous signifier qu'il a fini, pas bon pour les perfs peut être car strcmp coûte du temps peut être
 		//recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
 		//n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
@@ -121,10 +125,16 @@ void exchange_file(int port, int sockfd, struct sockaddr_in servaddr){
 		puts(seq_ptr);
 		bzero(buffer,sizeof(buffer)); // vide le buffer
 		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
+		nbre_octets +=n;
 		// char message[64];
 		// sprintf(message, "%d", message_number);
 		// int n2 = sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 	}
+	clock_t difference = clock() - before; // le nombre de tick que prend l'échange du fichier
+	//CLOCKS_PER_SEC : nombre de tick fait par le CPU en 1 sec (pour avoir le nombre de secondes)
+	long double time = ((long double)difference*1000/(long double)CLOCKS_PER_SEC);
+	printf("Durée échange fichier : %Lf millisecondes\n",time);
+	printf("Débit : %Lf octets/s\n",(long double)nbre_octets/(time/1000));
 	//fputs(buffer_file, fp);
 	//fwrite(buffer_file,1,1024,fp);
 	printf("Fichier reçu et crée\n");
