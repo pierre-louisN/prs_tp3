@@ -122,7 +122,7 @@ void exchange_file(int port, int sockfd, struct sockaddr_in servaddr){
 		//fputs(buffer, fp);
 		//printf("buffer contient : %s\n",buffer_file);
 		//strcat(buffer_file,seq_ptr);
-		puts(seq_ptr);
+		//puts(seq_ptr);
 		bzero(buffer,sizeof(buffer)); // vide le buffer
 		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
 		nbre_octets +=n;
@@ -141,32 +141,32 @@ void exchange_file(int port, int sockfd, struct sockaddr_in servaddr){
 	fclose(fp);
 }
 
-void exchange_data(int port, int sockfd, struct sockaddr_in servaddr){
-	int n, len;
-	char buffer_data[MAXLINE];
-	//bzero(buffer_,sizeof(buffer)); 
-	len = sizeof(servaddr);
-	servaddr.sin_port = htons(port); // on peut utiliser la même socket mais il faut changer le port 
-	int message_number = 1;
-	while(1){
-		sleep(2);
-		char message[64];
-		sprintf(message, "%d", message_number);
-		int n2 = sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-		recvfrom(sockfd, (char *)buffer_data, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);	
-		char delim[] = "_";
-		char *ptr = strtok(buffer_data, delim);
-		printf("Serveur : '%s'\n", buffer_data);
-		if(strcmp(ptr,"	ACK")==0){
-			ptr = strtok(NULL, delim);
-			int num_ack = atoi(ptr);
-			printf("numéro de l'ACK reçu : %d\n", num_ack);
-			if(num_ack==message_number){
-				message_number++;
-			}
-		}
-	}
-}
+// void exchange_data(int port, int sockfd, struct sockaddr_in servaddr){
+// 	int n, len;
+// 	char buffer_data[MAXLINE];
+// 	//bzero(buffer_,sizeof(buffer)); 
+// 	len = sizeof(servaddr);
+// 	servaddr.sin_port = htons(port); // on peut utiliser la même socket mais il faut changer le port 
+// 	int message_number = 1;
+// 	while(1){
+// 		sleep(2);
+// 		char message[64];
+// 		sprintf(message, "%d", message_number);
+// 		int n2 = sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+// 		recvfrom(sockfd, (char *)buffer_data, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);	
+// 		char delim[] = "_";
+// 		char *ptr = strtok(buffer_data, delim);
+// 		printf("Serveur : '%s'\n", buffer_data);
+// 		if(strcmp(ptr,"	ACK")==0){
+// 			ptr = strtok(NULL, delim);
+// 			int num_ack = atoi(ptr);
+// 			printf("numéro de l'ACK reçu : %d\n", num_ack);
+// 			if(num_ack==message_number){
+// 				message_number++;
+// 			}
+// 		}
+// 	}
+// }
 
 int main() {
 	int sockfd; // socket du client
