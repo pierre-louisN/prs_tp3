@@ -61,16 +61,6 @@ void createsocket(int *sockfd, struct sockaddr_in *servaddr, int port){
 		exit(EXIT_FAILURE);
 	}
 }
-char *concat(char const*str1, char const*str2) {
-   size_t const l1 = strlen(str1) ;
-   size_t const l2 = strlen(str2) ;
-
-    char* result = malloc(l1 + l2 + 1);
-    if(!result) return result;
-    memcpy(result, str1, l1) ;
-    memcpy(result + l1, str2, l2 + 1);
-    return result;
-}
 
 
 
@@ -131,7 +121,8 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
         sprintf(seq_char,"%06d",seq);
         // strcat et strlen ne marche qu'avec des fichier textes, à la place il faut utiliser memcpy et res_read
         //seq_char = concat(seq_char,"_");
-        seq_char = concat(seq_char,str);
+        memcpy(seq_char+6,str,sizeof(str));
+        //seq_char = concat(seq_char,str);
         //puts(seq_char);
         // on ne peut pas mettre strlen(seq_char) car cela ne marche que pour les string
         // les 7 octets en plus correspondent à "numdeseq_"
