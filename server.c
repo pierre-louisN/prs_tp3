@@ -11,13 +11,15 @@
 #include <signal.h>
 #include <sys/stat.h> // pour connaître la taille du fichier
 #include <math.h> // pour arrondir
+#include <sys/time.h> //gettimeofday
 
 
 #define PORT	 8080
 #define PORT2	 1234
 #define MAXLINE 1024
 #define WINDOW 5 // taille de la fenêtre
-#define SEGMENT_SIZE 64 // taille de la fenêtre
+#define SEGMENT_SIZE 1024 // taille d'un segment
+#define NUMSEQ_SIZE 6 // taille d'un segment
 
 // on va utiiliser une structure segment qui contient : 
 // - les donnes lu du fichier : le point  de départ dans le fichier et le nombre d'octet lus
@@ -28,10 +30,11 @@
 
 struct segment
 {
-    int seq_number;
+    // int seq_number; // le numéro de séquence va être l'indice dans le tableau, attention les numéros de séquence commence à 1
+    int init; // 1 si le segment a été transmis
     int byte_length; 
     struct timeval trans_time;
-    int ACK_received; 
+    int nbr_ACK_recv; 
     struct timeval last_ACK_recv_time; 
 };
 // le point de départ du segment = seq_number*sizeof(str)-1
@@ -72,8 +75,9 @@ char *concat(char const*str1, char const*str2) {
 
 
 int exchange_file(int data_socket, struct sockaddr_in data_addr){
-    char buffer[MAXLINE];
-    char buffer_ack[MAXLINE];
+    char buffer[SEGMENT_SIZE];
+    bzero(buffer,sizeof(buffer));
+    
     int n, len;
     len = sizeof(data_addr);
     // entrée dans la connexion 
@@ -82,9 +86,9 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     //printf("ici\n");
     printf("Client sent filename : %s\n", buffer);
     FILE *fp;
-    char str[SEGMENT_SIZE-6]; // va contenir ce qu'on lit dans le fichier
+    char str[SEGMENT_SIZE-NUMSEQ_SIZE]; // va contenir ce qu'on lit dans le fichier
     /* opening file for reading */
-    fp = fopen(buffer , "r"); // ouverture du fichier
+    fp = fopen(buffer , "rb"); // ouverture du fichier
     if(fp == NULL) {
         perror("Error opening file");
         return(-1);
@@ -94,7 +98,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     //char seq_char[64];
     char *seq_char = (char*) malloc(SEGMENT_SIZE*sizeof(char));
     int retval;
-    sprintf(seq_char,"%06d",seq); // on veut écrire le numéro de séquence dans une chaîne de caractères sur 6 chiffres 
+    sprintf(seq_char,"%0*d",NUMSEQ_SIZE ,seq); // on veut écrire le numéro de séquence dans une chaîne de caractères sur 6 chiffres 
     //while( fgets(str, 64, fp)!=NULL ) { // fgets : str => la chaîne qui contient la chaine de caractère lu, 60 : nmbre max de caractère à lire, fr : stream d'où sont lus les chaînes
     int res_read; 
     int max_ack = 0; // on va regarder quel est le plus gd dernier ack recu pour savoir lesquels on a déjà reçu et qu'on ne doit donc pas traité
@@ -106,26 +110,39 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
 
 
     double nbre_seg = ceil((double)file_size/(double)(SEGMENT_SIZE-6))+1; // on arrondi à l'entier supérieur pour connaître le nombre de segments nécessaires
-    //int nbre_seg = ceil((double)17.7);
     printf("%d segments nécessaires\n",(int)nbre_seg);
+    if(nbre_seg>640000){
+        printf("fichier trop grand \n");
+        exit(0);
+    }
+    char buffer_ack[(int)nbre_seg];
+    bzero(buffer_ack,sizeof(buffer_ack));
+    printf("ici\n");
     struct segment segments[(int)nbre_seg];
     // version avec fenêtre
     res_read = fread(str,1,sizeof(str),fp);
     int nbre_octets = res_read;
+    
     while(res_read){
         //printf("buffer nul\n");
-        printf("%d octets lus\n",res_read);
+        //printf("%d octets lus\n",res_read);
         nbre_octets+= res_read;
         //str[res_read] = '\0';
         sprintf(seq_char,"%06d",seq);
         // strcat et strlen ne marche qu'avec des fichier textes, à la place il faut utiliser memcpy et res_read
         //seq_char = concat(seq_char,"_");
         seq_char = concat(seq_char,str);
-        puts(seq_char);
+        //puts(seq_char);
         // on ne peut pas mettre strlen(seq_char) car cela ne marche que pour les string
         // les 7 octets en plus correspondent à "numdeseq_"
-        sendto(data_socket, (const char *)seq_char, res_read+6, MSG_CONFIRM, (const struct sockaddr *) &data_addr, len);
+        sendto(data_socket, (const char *)seq_char, res_read+NUMSEQ_SIZE, MSG_CONFIRM, (const struct sockaddr *) &data_addr, len);
         printf("Message n°%d envoyé au client\n",seq);
+        if(segments[seq].init!=1){ // si c'est bien la première transmission 
+            segments[seq].init = 1;
+            gettimeofday(&(segments[seq].trans_time),NULL);
+            segments[seq].byte_length = res_read;
+            segments[seq].nbr_ACK_recv = 0;
+        }
         seq++; 
         window_size --;
         
@@ -136,7 +153,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
         struct timeval tv; // le timer pour un ACK
         if(window_size==0){
             // si la fenêtre est à 0 alors on attend un ACK après un timer 
-            tv.tv_sec = 1; // le nombre de secondes qu'on va attendre 
+            tv.tv_sec = 1; // le nombre de secondes qu'on va attendre, va être en fonction du RTT 
             tv.tv_usec = 0; // ... millisecondes ...
             printf("fenêtre à O, on attend un ACK au maximum %d secondes sinon on retransmet\n",(int)tv.tv_sec);
              
@@ -161,24 +178,27 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
                 if(strcmp(seq_ptr,"ACK")==0){
                     //printf("ACK reçu \n");
                     seq_ptr = strtok(NULL, delim);
-                    
-                    
                     //puts(seq_ptr);
                     int nv_ack = strlen(seq_ptr);
                     // buffer[recv] = '\0'; 
                     // nv_ack = atoi(buffer);
-                
-                    printf("ACK n°%d reçu du client\n", nv_ack);
+                    segments[nv_ack].nbr_ACK_recv += 1;  // l'ack est le numéro de séquence du message acquitté
+                    gettimeofday(&(segments[nv_ack].last_ACK_recv_time),NULL);
+                    printf("Client : ACK n°%d\n", nv_ack);
                     if(nv_ack>max_ack){
                         window_size += nv_ack-max_ack; //((nv_ack-max_ack)+window_size>WINDOW) ? 5 : 
                         max_ack = nv_ack;
                         printf("Taille de fenêtre : %d\n",window_size);
                     }else{
-                        printf("DUPLICATE ACK ou OUT OF ORDER\n");
-                        // if(tv.tv_sec!=0){
-                        //     //return 1;
-                        //     printf("Retransmission à faire (duplicate ACK) \n");
-                        // }
+                        //printf("DUPLICATE ACK ou OUT OF ORDER\n"); // on reçoit un ACK qu'on a déjà où alors pas dans l'ordre
+                        // si pas dans l'ordre, donc inférieur au plus grand reçu => pas de pb 
+                        // si duplicate alors => retransmission 
+                        if(segments[nv_ack].nbr_ACK_recv >= 3){ // si on a reçu 3 fois ou plus le même ACK
+                            printf("Retransmission à faire (duplicate ACK) \n");
+                            seq -= segments[nv_ack].nbr_ACK_recv;
+                            fseek(fp,(seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET);
+                            // pour retransmettre les segments, on va décaler la fenêtre
+                        }
                     }
                 }
                 
@@ -240,25 +260,6 @@ int twh_serv(int sockfd, struct sockaddr_in cliaddr){
             if(ex==1){
                 return 1; 
             }
-            // Test fork : 
-            // int child_pid = fork();
-            // if (child_pid == 0){
-            //     printf("Hello from Child!\n");
-            //     close(sockfd);
-            //     int ex = exchange_file(data_socket,data_addr); 
-            //     if(ex==1){
-            //         // printf("exh succes\n");
-            //         // return child_pid; // le fils return son pid pour que son père le tue
-            //         exit( EXIT_SUCCESS );
-            //     }
-            //     //handle_client(data_socket,data_addr);   
-            // }
-            // // parent process because return value non-zero.
-            // else{
-            //     printf("Hello from Parent!\n");
-            //     close(data_socket);
-            //     return 1;
-            // }
         }
     }
     return 0;

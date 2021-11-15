@@ -14,6 +14,8 @@
 
 #define PORT	 8080 // numéro de port
 #define MAXLINE 1024 // taille max des message qu'on peut recevoir 
+#define SEGMENT_SIZE 1024 // taille d'un segment
+#define NUMSEQ_SIZE 6 // taille de la chaîne qui contient le numéro de séquence 
 
 void send_udp();
 void recv_udp(); 
@@ -110,80 +112,67 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 
 	// fin du three way handshake, on envoi des données sur le port de la socket data
 	char *filename = input_file;
-	
+	char char_seq[NUMSEQ_SIZE+1];
+	bzero(char_seq,sizeof(char_seq));
+	char_seq[NUMSEQ_SIZE+1] = '\0';
+
 	int n2 = sendto(sockfd, (const char *)filename, strlen(filename), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 	printf("filename envoyé \n");
 
 	FILE *fp;
 
 	int ack = 1;
-	char buffer_file[1024];
+	char buffer_file[SEGMENT_SIZE];
 	bzero(buffer_file,sizeof(buffer_file));
 
-	fp = fopen(output_file, "w");
+	fp = fopen(output_file, "wb");
 	n = recvfrom(sockfd, buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr,&len);
 	//buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
 	//printf("Server : %s\n", buffer);
-	int nbre_octets = n-6; // on va compter le nombre d'octet qu'on reçoit pour calculer le débit
+	int nbre_octets = n; // on va compter le nombre d'octet qu'on reçoit pour calculer le débit
 	char *ack_char;
 	// clock() est une fonction complexe donc on va plutot utiliser gettimeofday()
 	struct timeval time_before;
 	struct timeval time_after;
 	gettimeofday(&time_before,NULL);
-	char data[58];
-	bzero(data,sizeof(data));
-	char char_seq[7];
-	char_seq[7] = '\0';
-	bzero(char_seq,sizeof(char_seq));
 	// le 2e argument est la timezon mais est devenu obsolète
 	while(strcmp(buffer,"EOF")!=0){ // serveur nous envoi EOF pour nous signifier qu'il a fini, pas bon pour les perfs peut être car strcmp coûte du temps peut être
-		printf("%d octets reçus\n",n); 
+		//printf("%d octets reçus\n",n); 
 		//puts(buffer);
 		
 		//buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
 		
 		//printf("Server : %s\n", buffer);
 		 // il faut que la taille de ce tableau soit > 6 sinon on a undefined behaviour pour memcpy
-		memcpy(char_seq,buffer,6);
-		printf("le numéro de séquence est %s\n",char_seq);
+		memcpy(char_seq,buffer,NUMSEQ_SIZE);
+		//printf("le numéro de séquence est %s\n",char_seq);
 		int num_seq = atoi(char_seq);
 		printf("numéro de séquence reçu : %d\n",num_seq);
-		// if(ack == 1 || num_seq==ack+1){ // si c'est un segment reçu en continu alors on l'ACK
-		// 	ack = num_seq;
-
-		// 	generate_ack(&ack_char,ack);
-		// 	//printf("ici\n");
-		// 	//printf("ack : %s\n",ack_char);
-		// 	//sprintf(ack_char,"%6d",ack);
-		// 	// on peut utiliser strlen(ack_char) car c'est forcément une chaîne de caractères
-		// 	sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-		// 	printf("ACK n°%d envoyé\n",ack);
-		// }
-		// dés qu'on reçoit un message, on l'ACK
-		ack = num_seq;
-		generate_ack(&ack_char,ack);
-		//printf("ici\n");
-		//printf("ack : %s\n",ack_char);
-		//sprintf(ack_char,"%6d",ack);
-		// on peut utiliser strlen(ack_char) car c'est forcément une chaîne de caractères
-		sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-		printf("ACK n°%d envoyé\n",ack);
-		// printf("%c\n",buffer[8]);
-		// seq_ptr = strtok(NULL, delim);
-		memcpy(data,buffer+6,n);
-		printf("data : %s\n",data);
-		if(data!=NULL){
-			// pour écrire la chaîne au bon endroit, on va se déplacer au bon endroit avec fseek()
-			
-			fseek(fp,(num_seq-1)*58,SEEK_SET);			
-			fwrite(data,1,n-6,fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
-			
+		
+		// on ACK les message qui sont reçu en continu sinon on envoie le même ACK 
+		if(ack == 1 || num_seq==ack+1){ // si c'est un segment reçu en continu alors on l'ACK
+			ack = num_seq;
+			generate_ack(&ack_char,ack);
+			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+			//puts(ack_char);
+			printf("ACK n°%d envoyé\n",ack);
+		}else{ // on envoie l'ACK du dernier segments reçu en continu
+			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+			printf("ACK n°%d envoyé\n",ack);
 		}
-		nbre_octets +=n-6;
+		// ack = num_seq;
+		// generate_ack(&ack_char,ack);
+		// // on peut utiliser strlen(ack_char) car c'est forcément une chaîne de caractères
+		// sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+		// printf("ACK n°%d envoyé\n",ack);
+		if((buffer+NUMSEQ_SIZE)!=NULL){
+			// pour écrire la chaîne au bon endroit, on va se déplacer en focntion du numéro de séquence avec fseek()
+			fseek(fp,(num_seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET);			
+			fwrite((buffer+NUMSEQ_SIZE),1,n-NUMSEQ_SIZE,fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
+		}
+		nbre_octets += n;
 		bzero(buffer,sizeof(buffer)); // vide le buffer
 		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
-		
-		
 	}
 	gettimeofday(&time_after,NULL);
 	long double time_seconds = (time_after.tv_sec - time_before.tv_sec);
@@ -226,7 +215,8 @@ int main(int argc, char **argv) {
 	close(sockfd);
 	
 	char buffer[100];
-	snprintf(buffer, sizeof(buffer), "cmp --silent %s %s || echo files are different ", output_file, input_file);
+	//snprintf(buffer, sizeof(buffer), "cmp --silent %s %s || echo files are different ", output_file, input_file);
+	snprintf(buffer, sizeof(buffer), "cmp %s %s", output_file, input_file);
 	system(buffer);
 	return 0;
 }
