@@ -163,6 +163,7 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 			// pour écrire la chaîne au bon endroit, on va se déplacer en focntion du numéro de séquence avec fseek()
 			fseek(fp,(num_seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET);			
 			fwrite((buffer+NUMSEQ_SIZE),1,n-NUMSEQ_SIZE,fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
+			
 		}
 		bzero(buffer,sizeof(buffer)); // vide le buffer
 		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);

@@ -194,7 +194,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     printf("taille du fichier : %d\n",(int)file_size);
 
 
-    double nbre_seg = ceil((double)file_size/(double)(SEGMENT_SIZE)); // on arrondi à l'entier supérieur pour connaître le nombre de segments nécessaires
+    double nbre_seg = ceil((double)file_size/(double)(SEGMENT_SIZE-NUMSEQ_SIZE)); // on arrondi à l'entier supérieur pour connaître le nombre de segments nécessaires
     printf("%d segments nécessaires\n",(int)nbre_seg);
     if(nbre_seg>640000){
         printf("fichier trop grand \n");
@@ -227,6 +227,12 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
             window_size --;
             wait_for_ACK(data_socket,&window_size,nbre_seg, &max_ack, segments,&seq,fp);
             res_read = fread(str,1,sizeof(str),fp);
+            // if(res_read!=1018){
+            //     exit(0);
+            // }else{
+            //     printf("res_read : %d\n",res_read);
+            // }
+            printf("res_read : %d\n",res_read);
             nbre_octets+= res_read;
         }
         // if(window_size>1)
