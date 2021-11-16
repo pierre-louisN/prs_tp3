@@ -101,7 +101,6 @@ void generate_ack(char **ack_char, int ack){
 		*ack_char = concat(*ack_char,"A");
 		i--;
 	}
-
 }
 
 void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, char *output_file){
@@ -147,32 +146,27 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 		memcpy(char_seq,buffer,NUMSEQ_SIZE);
 		//printf("le numéro de séquence est %s\n",char_seq);
 		int num_seq = atoi(char_seq);
-		printf("numéro de séquence reçu : %d\n",num_seq);
+		printf("Serveur : Message n°%d\n",num_seq);
 		
 		// on ACK les message qui sont reçu en continu sinon on envoie le même ACK 
 		if(ack == 1 || num_seq==ack+1){ // si c'est un segment reçu en continu alors on l'ACK
 			ack = num_seq;
 			generate_ack(&ack_char,ack);
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-			//puts(ack_char);
 			printf("ACK n°%d envoyé\n",ack);
 		}else{ // on envoie l'ACK du dernier segments reçu en continu
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			printf("ACK n°%d envoyé\n",ack);
 		}
-		// ack = num_seq;
-		// generate_ack(&ack_char,ack);
-		// // on peut utiliser strlen(ack_char) car c'est forcément une chaîne de caractères
-		// sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-		// printf("ACK n°%d envoyé\n",ack);
+		
 		if((buffer+NUMSEQ_SIZE)!=NULL){
 			// pour écrire la chaîne au bon endroit, on va se déplacer en focntion du numéro de séquence avec fseek()
 			fseek(fp,(num_seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET);			
 			fwrite((buffer+NUMSEQ_SIZE),1,n-NUMSEQ_SIZE,fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
 		}
-		nbre_octets += n;
 		bzero(buffer,sizeof(buffer)); // vide le buffer
 		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
+		nbre_octets += n;
 	}
 	gettimeofday(&time_after,NULL);
 	long double time_seconds = (time_after.tv_sec - time_before.tv_sec);
@@ -180,7 +174,7 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 	//printf("nombre octets : %d\n",nbre_octets);
 	//printf("Durée échange fichier : %Lf secondes et %LF microsecondes\n",time_seconds,time_microsecondes);
 	printf("Débit : %Lf octets/s\n",(long double)(nbre_octets/(time_microsecondes/(1000000))));
-	printf("%d octets reçu\n",nbre_octets);
+	printf("%d octets reçus\n",nbre_octets);
 	printf("Fichier reçu et crée\n");
 	fclose(fp);
 }
