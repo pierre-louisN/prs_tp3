@@ -101,21 +101,30 @@ void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack,
         perror("select()");
     else if (retval){
         if(FD_ISSET(data_socket, &read_fds)!=0){
-            char buffer_ack[(int)(nbre_seg)+5]; // + 4 car on a "ACK_" au début 
+            char buffer_ack[10]; // + 4 car on a "ACK_" au début 
             //bzero(buffer_ack,sizeof(buffer_ack));
             memset( buffer_ack, '\0', sizeof(char)*sizeof(buffer_ack));
-            int recv = read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_ + ...AAAA
+            int recv = read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_AAAAAA où AAAAAA est le numéro de l'ACK
+           
             // printf("recv : %d\n",recv);
+            char message[5];
+            memcpy(message,buffer_ack,4);
+            
+            char ack_char[7];
+            memcpy(ack_char,buffer_ack+4,6);
+            
+            puts(message);
             // printf("sizeof : %d\n",(int)sizeof(buffer_ack));
-            //puts(buffer_ack);
-            char delim[] = "_";
-            char *seq_ptr = strtok(buffer_ack, delim);
+            
+            // char delim[] = "_";
+            // char *seq_ptr = strtok(buffer_ack, delim);
             //printf("seq_ptr : %s\n",seq_ptr);
-            if(strcmp(seq_ptr,"ACK")==0){
+            if(strcmp(message,"ACK_")==0){
                 //printf("ACK reçu \n");
-                seq_ptr = strtok(NULL, delim);
+                // seq_ptr = strtok(NULL, delim);
                 //puts(seq_ptr);
-                int nv_ack = strlen(seq_ptr);
+                int nv_ack = atoi(ack_char);
+                printf("Client : ACK n°%d\n", nv_ack);
                 // buffer[recv] = '\0'; 
                 // nv_ack = atoi(buffer);
                 // on va calculer le RTT du segment
@@ -127,7 +136,7 @@ void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack,
                 }else{
                     gettimeofday(&segments[nv_ack-1].last_ACK_recv_time, NULL);
                 }
-                printf("Client : ACK n°%d\n", nv_ack);
+                
                 if(nv_ack>*max_ack){
                     *window_size += nv_ack-*max_ack; //((nv_ack-max_ack)+window_size>WINDOW) ? 5 : 
                     *max_ack = nv_ack;
