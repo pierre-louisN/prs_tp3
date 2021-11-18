@@ -13,7 +13,7 @@
 #include <math.h> // pour arrondir
 #include <sys/time.h> //gettimeofday
 
-
+// le numéro de port public est en argument
 #define PORT	 8080
 #define PORT2	 1234
 #define MAXLINE 1024
@@ -70,12 +70,24 @@ void createsocket(int *sockfd, struct sockaddr_in *servaddr, int port){
 // et gettimeofday ne descend pas en dessous de la milliseconde.
 // Pas la peine de penser aux nanosecondes
 
-// struct timeval calcul_rtt(struct segment segments[], int seq){
+// Version avec pointeurs
+// struct timeval *mul(int value, struct timeval *rtt){
+//     struct timeval *res;
+//     res = (struct timeval *)malloc(sizeof(struct timeval));
+//     res->tv_sec = rtt->tv_sec*value;
+//     res->tv_usec = rtt->tv_usec*value;
+//     return res;
+// }
+
+// struct timeval *calcul_rtt(struct segment segments[], int seq){
+//     struct timeval *tv;
 //     if((seq-1)==0){ // si on est au premier segment
-//         return ((1-alpha)*(long double)(&segments[seq-1].rtt));
-//     }else{
-//         return (alpha*calcul_rtt(segments,seq-1)+(1-alpha)*(long double)(&segments[seq-1].rtt);
+//         tv = mul((1-alpha),&(segments[0].rtt));
 //     }
+//     else{
+//         timeradd(mul(alpha,calcul_rtt(segments,seq-1)),mul((1-alpha),&(segments[seq-1].rtt)),tv);
+//     }
+//     return tv;
 // }
 
 void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack, struct segment segments[], int *seq, FILE *fp){
@@ -104,7 +116,7 @@ void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack,
             char buffer_ack[10]; // + 4 car on a "ACK_" au début 
             //bzero(buffer_ack,sizeof(buffer_ack));
             memset( buffer_ack, '\0', sizeof(char)*sizeof(buffer_ack));
-            int recv = read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_AAAAAA où AAAAAA est le numéro de l'ACK
+            read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_AAAAAA où AAAAAA est le numéro de l'ACK
            
             // printf("recv : %d\n",recv);
             char message[5];
@@ -158,13 +170,11 @@ void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack,
         if(timer_set==1){ // si on a mis un timer et qu'on a pas reçu d'ACK      
             printf("Aucun ACK reçu, retransmission \n"); // le timer a expiré, on va retransmettre à partir du dernier segment acquitté + 1
             seq = max_ack+1;
-
         }else{
             printf("Aucun ACK reçu, message suivant\n");
         }
     }
-    timer_set = 0;
-    
+    timer_set = 0;   
 }
 
 
@@ -244,14 +254,14 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
             printf("res_read : %d\n",res_read);
             nbre_octets+= res_read;
         }
-        // if(window_size>1)
-        //     printf("Fenêtre : [%d,%d]\n",seq,seq+window_size);
-        // else if(window_size==1)
-        //     printf("Fenêtre : [%d]\n",seq);
-        // else
-        //     printf("Fenêtre : []\n");
+        if(window_size>1)
+            printf("Fenêtre : [%d,%d]\n",seq,seq+window_size);
+        else if(window_size==1)
+            printf("Fenêtre : [%d]\n",seq);
+        else
+            printf("Fenêtre : []\n");
     }
-    char *eof = "EOF";
+    char eof[4] = "FIN";
     sendto(data_socket, (const char *)eof, strlen(eof), MSG_CONFIRM, (const struct sockaddr *) &data_addr, sizeof(data_addr));
     fclose(fp);
     close(data_socket);
@@ -264,21 +274,20 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
 int twh_serv(int sockfd, struct sockaddr_in cliaddr){
     //printf("nv twh\n");
     int len, n;
-    char buffer[MAXLINE];
+    char buffer[4];
 	len = sizeof(cliaddr);//taille de la structure qui mène vers le client
     n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
 	buffer[n] = '\0';
-	//printf("Client : %s\n", buffer);
+	printf("Client : %s\n", buffer);
     if((strcmp(buffer,"SYN")) == 0){ //si le client s'est bien connecté alors on crée la socket de données
-        
+        memset( buffer, '\0', sizeof(char)*sizeof(buffer));
         int data_socket; //on va créer la socket de donnée
         struct sockaddr_in data_addr;
         //ici on va faire un fork pour gérer plusieurs clients en même temps 
         int port2 = PORT2;
-        printf("port 2 : %d\n",port2);
         createsocket(&data_socket,&data_addr,port2);
         
-        char message[64] = "SYN-ACK_";
+        char message[12] = "SYN-ACK";
         char port[5];
         sprintf(port, "%d", port2);
         strcat(message,port);
@@ -298,12 +307,20 @@ int twh_serv(int sockfd, struct sockaddr_in cliaddr){
 
 }
 
-int main() {
+int main(int argc, char **argv) {
+
+    int public_port;
+
+    if(argc >= 2){
+		public_port = atoi(argv[1]);
+	}else{
+		public_port = PORT;
+	}
+
 	int sockfd;
-	char buffer[MAXLINE];
 	struct sockaddr_in servaddr, cliaddr;
 	memset(&cliaddr, 0, sizeof(cliaddr));
-    createsocket(&sockfd,&servaddr,PORT);
+    createsocket(&sockfd,&servaddr,public_port);
 
     while(1){
         int res_twh = twh_serv(sockfd,cliaddr); // twh correspond au connect en TCP

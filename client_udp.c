@@ -42,12 +42,12 @@ void createsocket(int *sockfd, struct sockaddr_in *servaddr, int port){
 }
 
 int thw_client(int sockfd, struct sockaddr_in servaddr){
-    char buffer[MAXLINE]; // tableau pour recevoir des messages
+    char buffer[12]; // tableau pour recevoir des messages du serveur
     int n, len;
 
 	len = sizeof(servaddr);
     // début du three way hanshake
-    char *message_syn = "SYN"; // message de connexion
+    char message_syn[4] = "SYN"; // message de connexion
     if(sendto(sockfd, (const char *)message_syn, strlen(message_syn), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr)) > 0){
         printf("SYN envoyé\n");
     }else{
@@ -58,16 +58,20 @@ int thw_client(int sockfd, struct sockaddr_in servaddr){
 	// servaddr est l'addr où on envoie les données
     //recvfrom est une fonction bloquante, donc ce n'est pas nécessaire de faire un autre boucle par dessus 
     n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
-	buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
-	printf("Server : %s\n", buffer);
+	// buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
+	// printf("Server : %s\n", buffer);
+	
+	char message[8];
+	memcpy(message,buffer,7);
+	char port_char[5];
+	memcpy(port_char,buffer+7,4);
+	
 
-    char delim[] = "_";
-    char *ptr = strtok(buffer, delim);
-    printf("'%s'\n", ptr);
-    if(strcmp(ptr,"SYN-ACK")==0){
-        ptr = strtok(NULL, delim); // le serveur nous donne le numéro de port de sa nouvelle socket
+    if(strcmp(message,"SYN-ACK")==0){
+        // ptr = strtok(NULL, delim); // le serveur nous donne le numéro de port de sa nouvelle socket
         //printf("data socket port : %d\n", atoi(ptr));
-        char *message_ack = "ACK"; // message de test
+        char message_ack[4] = "ACK"; // message de test
+		
 		// ici il faut utiliser une autre chaîne de caractère que message car sinon memory leak
         if(sendto(sockfd, (const char *)message_ack, strlen(message_ack), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr)) > 0){
             printf("ACK envoyé\n");
@@ -77,7 +81,7 @@ int thw_client(int sockfd, struct sockaddr_in servaddr){
     }else{
         return 0;
     }
-    return atoi(ptr);
+    return atoi(port_char);
     
 }
 
@@ -114,14 +118,8 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 	struct timeval time_after;
 	gettimeofday(&time_before,NULL);
 	// le 2e argument est la timezon mais est devenu obsolète
-	while(strcmp(buffer,"EOF")!=0){ // serveur nous envoi EOF pour nous signifier qu'il a fini, pas bon pour les perfs peut être car strcmp coûte du temps peut être
+	while(strcmp(buffer,"FIN")!=0){ // serveur nous envoi EOF pour nous signifier qu'il a fini, pas bon pour les perfs peut être car strcmp coûte du temps peut être
 		//printf("%d octets reçus\n",n); 
-		//puts(buffer);
-		
-		//buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
-		
-		//printf("Server : %s\n", buffer);
-		 // il faut que la taille de ce tableau soit > 6 sinon on a undefined behaviour pour memcpy
 		memcpy(char_seq,buffer,NUMSEQ_SIZE);
 		//printf("le numéro de séquence est %s\n",char_seq);
 		int num_seq = atoi(char_seq);
@@ -182,6 +180,7 @@ int main(int argc, char **argv) {
 
     int res_twh = thw_client(sockfd,servaddr);
     if(res_twh != 0){
+		printf("Port de donnée du serveur : %d\n",res_twh);
 		struct sockaddr_in servaddr_data; // structure qui va contenir notre socket 
 		init_struct(&servaddr_data, res_twh);
         exchange_file(sockfd, servaddr_data,input_file,output_file);
