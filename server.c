@@ -21,12 +21,17 @@
 #define SEGMENT_SIZE 1024 // taille d'un segment
 #define NUMSEQ_SIZE 6 // taille d'un segment
 
+// Rappel cours : 
+// fenêtre de congestion => fenêtre qui contient les segments qu'on doit envoyer 
+// Flight size : nombre de segments qu'on a envoyé et qui n'ont pas encore été acquitté
+//serveur démarre un timer dès qu'il envoie un segment
 
 double alpha = 0.9; // représente le poids qu'on donne à l'historique 
 // si notre canal varie beacoup alors il vaut mieux mettre un alpha faible
 // s'il varie peu alors il faut mettre un grand alpha 
 
 double timer = 0; // va contenir le timer pour  le rtt
+int flightsize = 0;
 // on va utiiliser une structure segment qui contient : 
 // - les donnes lu du fichier : le point  de départ dans le fichier et le nombre d'octet lus
 // - son numéro de séquence 
@@ -101,91 +106,82 @@ void createsocket(int *sockfd, struct sockaddr_in *servaddr, int port){
 
 double calcul_rtt(struct segment segments[], int seq){
     // calcule le rtt d'un segment
-    return ((segments[seq-1].first_ACK_recv_time.tv_sec*1000+segments[seq-1].first_ACK_recv_time.tv_usec)-(segments[seq-1].trans_time.tv_sec*1000+segments[seq-1].trans_time.tv_usec));
+    // printf(" Trans : %f secondes et  %f millisecondes  \n",(double)segments[seq-1].trans_time.tv_sec,(double)segments[seq-1].trans_time.tv_usec);
+    // printf(" Recv : %f secondes et  %f millisecondes  \n",(double)segments[seq-1].first_ACK_recv_time.tv_sec,(double)segments[seq-1].first_ACK_recv_time.tv_usec);
+    // return ((segments[seq-1].first_ACK_recv_time.tv_sec*1000+segments[seq-1].first_ACK_recv_time.tv_usec)-(segments[seq-1].trans_time.tv_sec*1000+segments[seq-1].trans_time.tv_usec));
+    double secondes = segments[seq-1].first_ACK_recv_time.tv_sec - segments[seq-1].trans_time.tv_sec;
+    double millisecondes = abs(segments[seq-1].first_ACK_recv_time.tv_usec - segments[seq-1].trans_time.tv_usec);
+    return (secondes*1000+millisecondes);
 }
 
 double maj_timer(struct segment segments[], int seq){
     timer = alpha*timer+(1-alpha)*calcul_rtt(segments,seq);
 }
 
-void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack, struct segment segments[], int *seq, FILE *fp){
+void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, int *window_size, int nbre_seg, int *max_ack, struct segment segments[], int *seq, FILE *fp, char buffer_ack[], char message[], char ack_char[]){
     int retval;
     int timer_set = 0;
     fd_set read_fds;
     FD_ZERO(&read_fds); // création du set qui va contenir la socket
     FD_SET(data_socket, &read_fds); // met la socket de données dans le set
     struct timeval tv; // le timer pour un ACK
-    if(*window_size==0 || *seq==(int)nbre_seg+1){ // si notre fenêtre est vide ou qu'on a envoyé ts les segments on attend avec un timeout  
+    if(*window_size==0 || *seq==(int)nbre_seg+1){ // si notre fenêtre est vide ou qu'on a envoyé ts les segments on attend à l'infini   
         // si la fenêtre est à 0 alors on attend un ACK après un timer 
         timer_set = 1;
         // tv.tv_sec = 5; // le nombre de secondes qu'on va attendre, va être en fonction du RTT (pour l'instant 5 sec)
         // tv.tv_usec = 0; // ... millisecondes ...
         tv.tv_sec = 0; // le nombre de secondes qu'on va attendre, va être en fonction du RTT (pour l'instant 5 sec)
-        //printf("timer = %f\n",timer);
-        tv.tv_usec = 2*timer; // ... millisecondes .., on met 2*le RTT car il y a de la latence
-        // tv = calcul_rtt(segments,*seq);
-        // calcul_rtt(segments,*seq,&tv);
+        tv.tv_usec = 1.5*timer; // ... millisecondes .., on met 2*le RTT car il y a de la latence
         printf("%d millisecondes d'attente \n",(int)tv.tv_usec);
     }
     else{
         tv = (struct timeval){0}; 
         // initialisé à 0, on n'attend pas, on regarde et sinon on passe au message 
     }
+    // il faut démarrer un timer pour chaque message envoyé
     retval = select(data_socket+1, &read_fds, NULL, NULL, &tv); // regarde si la socket a reçu des données pendant tv secondes 
     if (retval == -1)
         perror("select()");
     else if (retval){
         if(FD_ISSET(data_socket, &read_fds)!=0){
-            char buffer_ack[10]; // + 4 car on a "ACK_" au début 
+            // char buffer_ack[10]; // + 4 car on a "ACK_" au début 
             //bzero(buffer_ack,sizeof(buffer_ack));
-            memset( buffer_ack, '\0', sizeof(char)*sizeof(buffer_ack));
-            read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_AAAAAA où AAAAAA est le numéro de l'ACK
-           
+            memset( buffer_ack, '\0', sizeof(char)*10);
+            memset( message, '\0', sizeof(char)*4);
+            memset( ack_char, '\0', sizeof(char)*7);
+            //read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_AAAAAA où AAAAAA est le numéro de l'ACK
+            recvfrom(data_socket, (char *)buffer_ack, 10, MSG_WAITALL, ( struct sockaddr *) &data_addr, &len);
             // printf("recv : %d\n",recv);
-            char message[5];
-            memcpy(message,buffer_ack,4);
-            
-            char ack_char[7];
-            memcpy(ack_char,buffer_ack+4,6);
-            
-            
-            // printf("sizeof : %d\n",(int)sizeof(buffer_ack));
-            
-            // char delim[] = "_";
-            // char *seq_ptr = strtok(buffer_ack, delim);
-            //printf("seq_ptr : %s\n",seq_ptr);
-            if(strcmp(message,"ACK_")==0){
-                //printf("ACK reçu \n");
-                // seq_ptr = strtok(NULL, delim);
-                //puts(seq_ptr);
+            // char message[4];
+            memcpy(message,buffer_ack,3);
+            // char ack_char[7];
+            memcpy(ack_char,buffer_ack+3,6);
+            if(strcmp(message,"ACK")==0){
                 int nv_ack = atoi(ack_char);
                 printf("Client : ACK n°%d\n", nv_ack);
-                // buffer[recv] = '\0'; 
-                // nv_ack = atoi(buffer);
                 // on va calculer le RTT du segment
                 segments[nv_ack-1].nbr_ACK_recv += 1;  // l'ack est le numéro de séquence du message acquitté
                 if(segments[nv_ack-1].nbr_ACK_recv==1){ // si c'est le premier ACK reçu 
-                    // calcul du RTT du segment
                     gettimeofday(&segments[nv_ack-1].first_ACK_recv_time, NULL);
                     //timersub(&segments[nv_ack-1].trans_time, &segments[nv_ack-1].last_ACK_recv_time,&segments[nv_ack-1].rtt);
                     // des qu'on reçoit un ACK on met à jour le RTT
                     maj_timer(segments,nv_ack);
+                    flightsize--;
                 }else{
                     gettimeofday(&segments[nv_ack-1].last_ACK_recv_time, NULL);
                 }
-                
                 if(nv_ack>*max_ack){
                     *window_size += nv_ack-*max_ack; //((nv_ack-max_ack)+window_size>WINDOW) ? 5 : 
                     *max_ack = nv_ack;
                     // printf("Taille de fenêtre : %d\n",*window_size);
                 }else{
-                    //printf("DUPLICATE ACK ou OUT OF ORDER\n"); // on reçoit un ACK qu'on a déjà où alors pas dans l'ordre
                     // si pas dans l'ordre, donc inférieur au plus grand reçu => pas de pb 
                     // si duplicate alors => retransmission 
                     if(segments[nv_ack-1].nbr_ACK_recv >= 3){ // si on a reçu 3 fois ou plus le même ACK
-                        printf("Duplicate ACK : Retransmission\n");
-                        *seq -= segments[nv_ack-1].nbr_ACK_recv; // on décale la fenêtre du nombre de fois où on a reçu l'ACK dupliqué 
-                        fseek(fp,(*seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET); // on se place au bon endroit dans le fichier
+                        *seq = nv_ack+1; // on décale la fenêtre au segment suivant l'ACK dupliqué 
+                        printf("DUPLICATE ACK retransmission à partir de : %d\n",*seq);
+                        *window_size = WINDOW;      
+                        // fseek(fp,(*seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET); // on se place au bon endroit dans le fichier
                     }
                 }
             }
@@ -193,12 +189,14 @@ void wait_for_ACK(int data_socket, int *window_size, int nbre_seg, int *max_ack,
     }
     else{
         if(timer_set==1){ // si on a mis un timer et qu'on a pas reçu d'ACK      
-            printf("Aucun ACK reçu, retransmission à partir de %d\n",*max_ack+1); // le timer a expiré, on va retransmettre à partir du segment suivant le dernier segment acquitté + 1 
-            seq = max_ack+1;
+            printf("TIMEOUT : Aucun ACK reçu, retransmission à partir de %d\n",*max_ack+1); // le timer a expiré, on va retransmettre à partir du segment suivant le dernier segment acquitté + 1 
+            *seq = *max_ack+1;
+            *window_size = WINDOW; 
         }else{
             printf("Aucun ACK reçu, message suivant\n");
         }
     }
+    printf("Nbres de messages envoyé pas encore acquitté : %d\n",flightsize);
     timer_set = 0;   
 }
 
@@ -225,7 +223,8 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     int seq = 1; // on va écrire le numéro de séquence sur 6 bits
     int window_size = WINDOW; // taille de la fenêtre, on va la décaler dès qu'on reçoit un ACK
     //char seq_char[64];
-    char *seq_char = (char*) malloc(SEGMENT_SIZE*sizeof(char));
+    //char *seq_char = (char*) malloc(SEGMENT_SIZE*sizeof(char));
+    char seq_char[SEGMENT_SIZE];
     //int retval;
     // sprintf(seq_char,"%0*d",NUMSEQ_SIZE ,seq); // on veut écrire le numéro de séquence dans une chaîne de caractères sur NUMSEQ_SIZE chiffres 
     //while( fgets(str, 64, fp)!=NULL ) { // fgets : str => la chaîne qui contient la chaine de caractère lu, 60 : nmbre max de caractère à lire, fr : stream d'où sont lus les chaînes
@@ -250,40 +249,42 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     // version avec fenêtre
     res_read = fread(str,1,sizeof(str),fp);
     int nbre_octets = res_read;
+    char buffer_ack[10]; // 4 + 6 car on a "ACK" au début
+    char message[4];  
+    // memcpy(message,buffer_ack,3);
+    char ack_char[7];
+    // buffers utilisé pour recevoir les ACK 
+    // memcpy(ack_char,buffer_ack+3,6);
     // while(res_read){
     while(max_ack!=(int)nbre_seg){
-        if(seq==(int)nbre_seg+1){
-            printf("Dernier segment envoyé, Serveur attend ACK\n");
-            wait_for_ACK(data_socket,&window_size,nbre_seg, &max_ack, segments,&seq,fp);
-        }else{
-            //printf("%d octets lus\n",res_read);
+        if(seq!=(int)nbre_seg+1){ // si on est pas au dernier segment
+            // printf("%d octets lus\n",res_read);
             sprintf(seq_char,"%06d" ,seq);
             memcpy(seq_char+6,str,sizeof(str));
+            //puts(str);
             sendto(data_socket, (const char *)seq_char, res_read+NUMSEQ_SIZE, MSG_CONFIRM, (const struct sockaddr *) &data_addr, sizeof(data_addr));
             printf("Message n°%d envoyé au client\n",seq);
-            if(segments[seq-1].init!=1){ // si c'est bien la première transmission 
+            if(segments[seq-1].init!=1){ // si c'est bien la première transmission du segment courant
                 segments[seq-1].init = 1;
                 gettimeofday(&(segments[seq-1].trans_time),NULL);
                 segments[seq-1].byte_length = res_read;
                 segments[seq-1].nbr_ACK_recv = 0;
+                flightsize++;
             }
             seq++; 
-            window_size --;
-            wait_for_ACK(data_socket,&window_size,nbre_seg, &max_ack, segments,&seq,fp);
-            res_read = fread(str,1,sizeof(str),fp);
-            // if(res_read!=1018){
-            //     exit(0);
-            // }else{
-            //     printf("res_read : %d\n",res_read);
-            // }
-            nbre_octets+= res_read;
+            window_size --; 
         }
+        wait_for_ACK(data_socket,data_addr,len,&window_size,nbre_seg, &max_ack, segments,&seq,fp,buffer_ack, message, ack_char);
+        printf("seq : %d\n",seq);
+        fseek(fp,(seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET); // on se place au bon endroit dans le fichier
+        res_read = fread(str,1,sizeof(str),fp); 
+        nbre_octets+= res_read;
         if(window_size>1)
             printf("Fenêtre : [%d,%d]\n",seq,seq+window_size);
         else if(window_size==1)
             printf("Fenêtre : [%d]\n",seq);
         else
-            printf("Fenêtre : []\n");
+            printf("Fenêtre : []\n"); // DEBUG : la fenêtre ne peut jamais être à 0 normalement
     }
     char eof[4] = "FIN";
     sendto(data_socket, (const char *)eof, strlen(eof), MSG_CONFIRM, (const struct sockaddr *) &data_addr, sizeof(data_addr));

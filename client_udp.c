@@ -112,7 +112,7 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 	//buffer[n] = '\0'; // signifie la fin d'un string (ici le message)
 	//printf("Server : %s\n", buffer);
 	int nbre_octets = n; // on va compter le nombre d'octet qu'on reçoit pour calculer le débit
-	char ack_char[11]; // l'ack comme le numéro de séquence va être codée sur 6 octets
+	char ack_char[10]; // l'ack comme le numéro de séquence va être codée sur 6 octets
 	// clock() est une fonction complexe donc on va plutot utiliser gettimeofday()
 	struct timeval time_before;
 	struct timeval time_after;
@@ -128,11 +128,11 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 		// on ACK les message qui sont reçu en continu sinon on envoie le même ACK 
 		if(ack == 1 || num_seq==ack+1){ // si c'est un segment reçu en continu alors on l'ACK
 			ack = num_seq;
-			memcpy(ack_char,"ACK_",4);
-			sprintf(ack_char+4,"%06d" ,ack);
+			memcpy(ack_char,"ACK",3);
+			sprintf(ack_char+3,"%06d" ,ack);
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			printf("ACK n°%d envoyé\n",ack);
-		}else{ // on envoie l'ACK du dernier segments reçu en continu
+		}else if(num_seq>ack && num_seq!=ack+1){ // si c'est un segment qui n'est pas dans l'ordre et jamais reçu on envoie l'ACK du dernier segments reçu en continu
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			printf("ACK n°%d envoyé\n",ack);
 		}
