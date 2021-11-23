@@ -17,9 +17,16 @@
 #define PORT	 8080
 #define PORT2	 1234
 #define MAXLINE 1024
-#define WINDOW 5 // taille de la fenêtre
+#define WINDOW 5 // taille initiale de la fenêtre (quand on a une perte on va revenir à cette valeur)
 #define SEGMENT_SIZE 1024 // taille d'un segment
-#define NUMSEQ_SIZE 6 // taille d'un segment
+#define NUMSEQ_SIZE 6 // taille d'un segmente valeur)
+
+int cwnd = 1;
+int slow_start = 1;
+int congestion_avoidance = 0;
+int fast_retransmit = 1;
+int fast_recovery = 1;
+
 
 // Rappel cours : 
 // fenêtre de congestion => fenêtre qui contient les segments qu'on doit envoyer 
@@ -93,7 +100,7 @@ double maj_timer(struct segment segments[], int seq){
     timer = alpha*timer+(1-alpha)*calcul_rtt(segments,seq);
 }
 
-void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, int *window_size, int nbre_seg, int *max_ack, struct segment segments[], int *seq, FILE *fp, char buffer_ack[], char message[], char ack_char[], int *flightsize, int *cwnd, int *ssthresh){
+void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, int *window_size, int nbre_seg, int *max_ack, struct segment segments[], int *seq, FILE *fp, int *flightsize, int *ssthresh, int *deflate_ack){
     int retval;
     int timer_set = 0;
     fd_set read_fds;
@@ -119,17 +126,17 @@ void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, int *w
         perror("select()");
     else if (retval){
         if(FD_ISSET(data_socket, &read_fds)!=0){
-            // char buffer_ack[10]; // + 4 car on a "ACK_" au début 
+            char buffer_ack[10]; // + 4 car on a "ACK_" au début 
             //bzero(buffer_ack,sizeof(buffer_ack));
-            memset( buffer_ack, '\0', sizeof(char)*10);
-            memset( message, '\0', sizeof(char)*4);
-            memset( ack_char, '\0', sizeof(char)*7);
+            // memset( buffer_ack, '\0', sizeof(char)*10);
+            // memset( message, '\0', sizeof(char)*4);
+            // memset( ack_char, '\0', sizeof(char)*7);
             //read(data_socket,buffer_ack,sizeof(buffer_ack)); // le message d'ack est de la forme ACK_AAAAAA où AAAAAA est le numéro de l'ACK
             recvfrom(data_socket, (char *)buffer_ack, 10, MSG_WAITALL, ( struct sockaddr *) &data_addr, &len);
             // printf("recv : %d\n",recv);
-            // char message[4];
+            char message[4];
             memcpy(message,buffer_ack,3);
-            // char ack_char[7];
+            char ack_char[7];
             memcpy(ack_char,buffer_ack+3,6);
             if(strcmp(message,"ACK")==0){
                 int nv_ack = atoi(ack_char);
@@ -147,24 +154,41 @@ void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, int *w
                 }
                 if(nv_ack>*max_ack){
                     // *window_size += nv_ack-*max_ack;
-                    if(cwnd>ssthresh){ // CONGESTION AVOIDANCE => cwnd += 1/cwnd pour chaque ACK
-                        *cwnd += (nv_ack-*max_ack)/(*cwnd);    
+                    if(window_size>ssthresh && congestion_avoidance){ // CONGESTION AVOIDANCE => cwnd += 1/cwnd pour chaque ACK
+                        cwnd += (nv_ack-*max_ack)/(cwnd);    
                     }else{ // SLOW START => cwnd +=1 pour chaque ACK 
-                        *cwnd += nv_ack-*max_ack;
+                        cwnd += nv_ack-*max_ack;
                     }                    
-                    *window_size = *cwnd;
+                    // *window_size = *cwnd;
                     *max_ack = nv_ack;
                     // printf("Taille de fenêtre : %d\n",*window_size);
                 }else{
+                    if(nv_ack==*deflate_ack+1){ // si on a reçu l'ack suivant l'ack qu'on a reçu en dupliqué 
+                        *ssthresh = *flightsize/2;
+                        cwnd=*ssthresh; // deflation de la fenêtre
+                    }
                     // si pas dans l'ordre, donc inférieur au plus grand reçu => pas de pb 
                     // si duplicate alors => retransmission 
                     if(segments[nv_ack-1].nbr_ACK_recv >= 3){ // si on a reçu 3 fois ou plus le même ACK
                         *seq = nv_ack+1; // on décale la fenêtre au segment suivant l'ACK dupliqué 
                         printf("DUPLICATE ACK retransmission à partir de : %d\n",*seq);
-                        // *window_size = WINDOW;
                         *ssthresh = *flightsize/2;
-                        *cwnd=1;	
-                        *window_size = *cwnd; 
+                        // *window_size = WINDOW;
+                        if(fast_retransmit){
+                            *flightsize = cwnd; // on suppose que cwnd est forcément < rwnd, normalement il faut faire min(rwnd,cwnd) mais on ne connaît pas rwnd
+                            cwnd = 1;
+                            congestion_avoidance = 0; // on repasse en SLOW START
+                        }
+                        if(fast_recovery){
+                            cwnd=*ssthresh+segments[nv_ack-1].nbr_ACK_recv; // inflation de la fenêtre
+                            congestion_avoidance = 1; // on passe directement en CONGESTION AVOIDANCE
+                        }else{	
+                            cwnd = 1;    
+                            *window_size = cwnd;
+                            congestion_avoidance = 1;   
+                        }
+                        *deflate_ack = nv_ack; // l'ack qu'on attend pour deflate la fenêtre
+                        
                         // fseek(fp,(*seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET); // on se place au bon endroit dans le fichier
                     }
                 }
@@ -175,9 +199,10 @@ void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, int *w
         if(timer_set==1){ // si on a mis un timer et qu'on a pas reçu d'ACK      
             printf("TIMEOUT : Aucun ACK reçu, retransmission à partir de %d\n",*max_ack+1); // le timer a expiré, on va retransmettre à partir du segment suivant le dernier segment acquitté + 1 
             *seq = *max_ack+1;
-            *ssthresh = *flightsize/2;
-            *cwnd=1;	    
-            *window_size = *cwnd;    
+            *ssthresh = *flightsize/2;    
+            cwnd = 1;
+            congestion_avoidance = 1;    
+            *window_size = cwnd;
             // *window_size = WINDOW; 
         }else{
             printf("Aucun ACK reçu, message suivant\n");
@@ -209,7 +234,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     }
     int seq = 1; // on va écrire le numéro de séquence sur 6 bits
     //int window_size = WINDOW; // taille de la fenêtre, on va la décaler dès qu'on reçoit un ACK
-    int cwnd = 1; // on commence avec la fenêtre à 1 => SLOW START
+    // int cwnd = 1; // on commence avec la fenêtre à 1 => SLOW START
     int window_size = cwnd; // window_size : le nombre de segments qu'on va pouvoir envoyer avant de se bloquer pendant RTT pour recevoir un ACK
     int ssthresh = 2147483647; // va être le seuil pour lequel on passe de SLOW START à CONGESTION AVOIDANCE 
     int flightsize = 0;
@@ -237,11 +262,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     struct segment segments[(int)nbre_seg];
     res_read = fread(str,1,sizeof(str),fp);
     int nbre_octets = res_read;
-    char buffer_ack[10]; // 4 + 6 car on a "ACK" au début
-    char message[4];  
-    char ack_char[7];
-    // buffers utilisé pour recevoir les ACK 
-    //int cwnd = 1;
+    int deflate_ack = 0;
     while(max_ack!=(int)nbre_seg){
         if(seq!=(int)nbre_seg+1){ // si on est pas au dernier segment
             // printf("%d octets lus\n",res_read);
@@ -260,7 +281,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
             seq++; 
             window_size --; 
         }
-        wait_for_ACK(data_socket,data_addr,len,&window_size,nbre_seg, &max_ack,segments,&seq,fp,buffer_ack, message, ack_char, &flightsize, &cwnd, &ssthresh);
+        wait_for_ACK(data_socket,data_addr,len,&window_size,nbre_seg, &max_ack,segments,&seq,fp,&flightsize,&ssthresh, &deflate_ack);
         printf("seq : %d\n",seq);
         fseek(fp,(seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET); // on se place au bon endroit dans le fichier
         res_read = fread(str,1,sizeof(str),fp); 
