@@ -13,8 +13,8 @@
 
 
 #define PORT	 8080 // numéro de port
-#define MAXLINE 1024 // taille max des message qu'on peut recevoir 
-#define SEGMENT_SIZE 1024 // taille d'un segment
+#define MAXLINE 1500 // taille max des message qu'on peut recevoir 
+#define SEGMENT_SIZE 1500 // taille d'un segment
 #define NUMSEQ_SIZE 6 // taille de la chaîne qui contient le numéro de séquence 
 
 void send_udp();
@@ -103,7 +103,7 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 
 	FILE *fp;
 
-	int ack = 1;
+	int ack = 0;
 	char buffer_file[SEGMENT_SIZE];
 	bzero(buffer_file,sizeof(buffer_file));
 
@@ -123,25 +123,27 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 		memcpy(char_seq,buffer,NUMSEQ_SIZE);
 		//printf("le numéro de séquence est %s\n",char_seq);
 		int num_seq = atoi(char_seq);
-		printf("Serveur : Message n°%d\n",num_seq);
+		//Message received: 1024 bytes seq 000001
+		printf("Message received : %d bytes seq %d\n",n,num_seq);
 		
 		// on ACK les message qui sont reçu en continu sinon on envoie le même ACK 
-		if(ack == 1 || num_seq==ack+1){ // si c'est un segment reçu en continu alors on l'ACK
+		if(num_seq==ack+1){ // si c'est un segment reçu en continu alors on l'ACK et on l'écrit dans le fichier 
 			ack = num_seq;
 			memcpy(ack_char,"ACK",3);
 			sprintf(ack_char+3,"%06d" ,ack);
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			printf("ACK n°%d envoyé\n",ack);
+			if((buffer+NUMSEQ_SIZE)!=NULL){
+			// pour écrire la chaîne au bon endroit, on va se déplacer en focntion du numéro de séquence avec fseek()
+			//fseek(fp,(num_seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET);			
+				fwrite((buffer+NUMSEQ_SIZE),1,n-NUMSEQ_SIZE,fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
+			}
 		}else if(num_seq>ack && num_seq!=ack+1){ // si c'est un segment qui n'est pas dans l'ordre et jamais reçu on envoie l'ACK du dernier segments reçu en continu
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-			printf("ACK n°%d envoyé\n",ack);
-		}
-		
-		if((buffer+NUMSEQ_SIZE)!=NULL){
-			// pour écrire la chaîne au bon endroit, on va se déplacer en focntion du numéro de séquence avec fseek()
-			fseek(fp,(num_seq-1)*(SEGMENT_SIZE-NUMSEQ_SIZE),SEEK_SET);			
-			fwrite((buffer+NUMSEQ_SIZE),1,n-NUMSEQ_SIZE,fp); // on enlève 7 octet car les 7 premiers octets ne sont pas utiles
-			
+			printf("OUT OF ORDER : ACK n°%d envoyé\n",ack);
+		}else{
+			printf("out of order \n"); 
+			//exit(0);
 		}
 		bzero(buffer,sizeof(buffer)); // vide le buffer
 		n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
