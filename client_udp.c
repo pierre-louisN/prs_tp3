@@ -131,6 +131,7 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 			ack = num_seq;
 			memcpy(ack_char,"ACK",3);
 			sprintf(ack_char+3,"%06d" ,ack);
+			
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			printf("ACK n°%d envoyé\n",ack);
 			if((buffer+NUMSEQ_SIZE)!=NULL){
@@ -142,7 +143,7 @@ void exchange_file(int sockfd, struct sockaddr_in servaddr, char *input_file, ch
 			sendto(sockfd, (const char *)ack_char, strlen(ack_char), MSG_DONTWAIT, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			printf("OUT OF ORDER : ACK n°%d envoyé\n",ack);
 		}else{
-			printf("out of order \n"); 
+			printf("out of order, should receive : %d\n",ack+1); 
 			//exit(0);
 		}
 		bzero(buffer,sizeof(buffer)); // vide le buffer
@@ -172,7 +173,7 @@ int main(int argc, char **argv) {
 		output_file = argv[2];
 	}else{
 		input_file = "bigfile.txt";
-		output_file = "output_file.txt";
+		output_file = "copy_bigfile.txt";
 	}
 
 	// les arguments du client sont le nom du fichier de sortie et le fichier d'entrée
