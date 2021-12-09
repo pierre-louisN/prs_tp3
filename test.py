@@ -20,7 +20,7 @@ def call_client():
     #print(end - start)
     result = output.find('Total bytes received '.encode()) # donne l'index pour trouver le nombre d'octets 
     val = (int)(output[result+21:-1].decode('UTF-8'))
-    print(val,"octets en ",(end - start)," secondes")
+    print(val,"octets en",(end - start)," secondes")
     debit = (val/(end - start))
     print(debit,"octets/s")
 

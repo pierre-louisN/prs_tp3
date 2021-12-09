@@ -18,7 +18,7 @@
 #define PORT2	 1234
 #define MAXLINE 1024
 #define WINDOW 5 // taille initiale de la fenêtre (quand on a une perte on va revenir à cette valeur)
-#define SEGMENT_SIZE 16 // taille d'un segment
+#define SEGMENT_SIZE 1500 // taille d'un segment
 #define NUMSEQ_SIZE 6 // taille du numéro de séquence
 #define BUFFER_SIZE 6 // taille du buffer circulaire
 
@@ -78,6 +78,9 @@ double alpha = 0.9; // représente le poids qu'on donne à l'historique
 
 double timer = 100; // le nombre de microsecondes durant lesquels le serveur va attendre un ACK quand sa fenêtre est vide
 
+int rto_enable = 1; 
+int rto = 0; 
+
 // on va utiiliser une structure segment qui contient : 
 // - les donnes lu du fichier : le point  de départ dans le fichier et le nombre d'octet lus
 // - son numéro de séquence 
@@ -122,6 +125,12 @@ void reset_var(){ // on va reset les variables pour les nouveaux clients
      lost_seg = 0; // nombre de retranssmission car segments perdu
      lost_ack= 0; // nombre de retranssmission car ack perdu 
      retransmission = 0;
+    alpha = 0.9; // représente le poids qu'on donne à l'historique 
+
+    timer = 100; // le nombre de microsecondes durant lesquels le serveur va attendre un ACK quand sa fenêtre est vide
+
+    rto_enable = 1; 
+    rto = 2*timer; 
 }
 
 
@@ -166,6 +175,7 @@ double maj_timer(struct segment segments[], int seq){
             printf("error, timer négatif \n");
             exit(0);
     }
+    rto = 2*timer;  
 }
 
 void handle_DACK(struct segment segments[]){
@@ -241,7 +251,7 @@ void free_space(struct segment segments[], int index){
     }else{
         //printf("premier segment, on ne libère rien\n");
     }
-    
+
 }
 
 void maj_ACK(struct segment segments[]){
@@ -329,8 +339,12 @@ void recv_ACK(int data_socket, struct sockaddr_in data_addr, int len, struct seg
     puts(buffer_ack);
     char message[4];
     memcpy(message,buffer_ack,3);
+    message[3] = '\0';
+    puts(message);
     char ack_char[7];
     memcpy(ack_char,buffer_ack+3,6);
+    ack_char[6] = '\0';
+    puts(ack_char);
     if(strcmp(message,"ACK")==0){
         nv_ack = atoi(ack_char);
         printf("Client : ACK n°%d\n", nv_ack);
@@ -448,35 +462,43 @@ void send_segment(int data_socket, struct sockaddr_in data_addr, struct segment 
     int retrans_seg = 0;
     // printf("str avant de lire : %s\n",str);
     // printf("Taille de str : %d\n",len_str);
-    if(segments[(seq-1)%buff_size].init==1){ // si on a déjà transmis on prend les octets stockés en mémoire 
+    struct timeval current;
+    struct timeval res;
+    gettimeofday(&current, NULL);
+    timersub(&current, &segments[(seq-1)%buff_size].trans_time,&res);
+    if( (rto_enable && segments[(seq-1)%buff_size].init==1 && (res.tv_sec*1000+res.tv_usec)>rto) || (!rto_enable) || (segments[(seq-1)%buff_size].init!=1) ){
+        if(segments[(seq-1)%buff_size].init==1){ // si on a déjà transmis on prend les octets stockés en mémoire 
         memcpy(str,segments[(seq-1)%buff_size].bytes,segments[(seq-1)%buff_size].byte_length);
         res_read = segments[(seq-1)%buff_size].byte_length;
         retrans_seg = 1;
-        //printf("Retransmission\n");
-    }else{ // sinon on lit dans le fichier
-        res_read = fread(str,1,len_str,fp); 
-        nbre_octets+= res_read;
+            //printf("Retransmission\n");
+        }else{ // sinon on lit dans le fichier
+            res_read = fread(str,1,len_str,fp); 
+            nbre_octets+= res_read;
+        }
+        // printf("str après avoir lu : %s\n",str);        
+        // si on est pas au dernier segment alors on envoie
+        //printf("%d octets lus\n",res_read);
+        sprintf(seq_char,"%06d" ,seq);
+        memcpy(seq_char+NUMSEQ_SIZE,str,res_read);
+        //printf("str après avoir cpy : %s\n",str);
+        // printf("Message seq_char envoyé : %s\n",seq_char);
+        // printf("Taille de str : %d\n",(int)strlen(str));
+        //printf("Taille du segment : %d\n",(int)strlen(seq_char));
+        if(res_read==0){
+            printf("error, Aucun octet lus pour le segment %d\n",seq);
+            //printf("Case n°%d du tableau (init = %d) pour le segment n°%d contient : %s et a reçu %d ACK\n",(seq-1)%buff_size,segments[(seq-1)%buff_size].init,segments[(seq-1)%buff_size].seq,segments[(seq-1)%buff_size].bytes,segments[(seq-1)%buff_size].nbr_ACK_recv);
+            exit(0);
+        }
+        bytes_sent = sendto(data_socket, (const char *)seq_char, res_read+NUMSEQ_SIZE, MSG_CONFIRM, (const struct sockaddr *) &data_addr, sizeof(data_addr));
+        res_sent += bytes_sent; 
+        printf("Message n°%d sent : %d bytes\n",seq,bytes_sent);
+        init_segment(segments,str,retrans_seg);
+        seq++; 
+        window_size --;
+    }else{
+        printf("Wait %d milliseconds before sending segment n°%d\n",(int)(res.tv_sec*1000+res.tv_usec),seq);
     }
-    // printf("str après avoir lu : %s\n",str);        
-    // si on est pas au dernier segment alors on envoie
-    //printf("%d octets lus\n",res_read);
-    sprintf(seq_char,"%06d" ,seq);
-    memcpy(seq_char+NUMSEQ_SIZE,str,res_read);
-    //printf("str après avoir cpy : %s\n",str);
-    // printf("Message seq_char envoyé : %s\n",seq_char);
-    // printf("Taille de str : %d\n",(int)strlen(str));
-    //printf("Taille du segment : %d\n",(int)strlen(seq_char));
-    if(res_read==0){
-        printf("error, Aucun octet lus pour le segment %d\n",seq);
-        //printf("Case n°%d du tableau (init = %d) pour le segment n°%d contient : %s et a reçu %d ACK\n",(seq-1)%buff_size,segments[(seq-1)%buff_size].init,segments[(seq-1)%buff_size].seq,segments[(seq-1)%buff_size].bytes,segments[(seq-1)%buff_size].nbr_ACK_recv);
-        exit(0);
-    }
-    bytes_sent = sendto(data_socket, (const char *)seq_char, res_read+NUMSEQ_SIZE, MSG_CONFIRM, (const struct sockaddr *) &data_addr, sizeof(data_addr));
-    res_sent += bytes_sent; 
-    printf("Message n°%d sent : %d bytes\n",seq,bytes_sent);
-    init_segment(segments,str,retrans_seg);
-    seq++; 
-    window_size --; 
 }
 
 void segments_print(struct segment segments[]){
@@ -567,7 +589,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     printf("%d octets lus et %d octets envoyés\n",(int)nbre_octets,res_sent);
     printf("%d segments perdus sur %d initiaux\n",(int)lost_seg,(int)nbre_seg);
     printf("%d ACK perdus\n",(int)lost_ack);
-    segments_print(segments);
+    //segments_print(segments);
     return 1;
 }
 
