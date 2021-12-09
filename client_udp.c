@@ -14,7 +14,7 @@
 
 #define PORT	 8080 // numéro de port
 #define MAXLINE 1500 // taille max des message qu'on peut recevoir 
-#define SEGMENT_SIZE 1500 // taille d'un segment
+#define SEGMENT_SIZE 16 // taille d'un segment
 #define NUMSEQ_SIZE 6 // taille de la chaîne qui contient le numéro de séquence 
 
 void send_udp();
