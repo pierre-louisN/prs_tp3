@@ -17,10 +17,10 @@
 #define PORT	 8080
 #define PORT2	 1234
 #define MAXLINE 1024
-#define WINDOW 10 // taille initiale de la fenêtre (quand on a une perte on va revenir à cette valeur)
+#define WINDOW 5 // taille initiale de la fenêtre (quand on a une perte on va revenir à cette valeur)
 #define SEGMENT_SIZE 1500 // taille d'un segment
 #define NUMSEQ_SIZE 6 // taille du numéro de séquence
-#define BUFFER_SIZE 64000 // taille du buffer circulaire
+#define BUFFER_SIZE 6 // taille du buffer circulaire
 
 
 //Notes importantes : 
@@ -72,11 +72,11 @@ int retransmission = 0;
 
 
 
-double alpha = 0.1; // représente le poids qu'on donne à l'historique 
+double alpha = 0.9; // représente le poids qu'on donne à l'historique 
 // si notre canal varie beacoup alors il vaut mieux mettre un alpha faible
 // s'il varie peu alors il faut mettre un grand alpha 
 
-double timer = 1000; // le nombre de microsecondes durant lesquels le serveur va attendre un ACK quand sa fenêtre est vide
+double timer = 100; // le nombre de microsecondes durant lesquels le serveur va attendre un ACK quand sa fenêtre est vide
 
 int rto_enable = 1; 
 int rto = 0; 
@@ -102,7 +102,7 @@ struct segment
     int seq;
 };
 
-void reset_var(int alpha){ // on va reset les variables pour les nouveaux clients 
+void reset_var(){ // on va reset les variables pour les nouveaux clients 
      cwnd = 1; // mettre ça dans une fonction, pas en local 
      window_size;
      timer_set = 0;
@@ -125,11 +125,11 @@ void reset_var(int alpha){ // on va reset les variables pour les nouveaux client
      lost_seg = 0; // nombre de retranssmission car segments perdu
      lost_ack= 0; // nombre de retranssmission car ack perdu 
      retransmission = 0;
-    alpha = alpha; // représente le poids qu'on donne à l'historique 
+    alpha = 0.9; // représente le poids qu'on donne à l'historique 
 
-    timer = 1000; // le nombre de microsecondes durant lesquels le serveur va attendre un ACK quand sa fenêtre est vide
+    timer = 100; // le nombre de microsecondes durant lesquels le serveur va attendre un ACK quand sa fenêtre est vide
 
-    rto_enable = 0; 
+    rto_enable = 1; 
     rto = 2*timer; 
 }
 
@@ -166,17 +166,14 @@ double calcul_rtt(struct segment segments[], int seq){
     //return ((segments[seq-1].first_ACK_recv_time.tv_sec*1000+segments[seq-1].first_ACK_recv_time.tv_usec)-(segments[seq-1].trans_time.tv_sec*1000+segments[seq-1].trans_time.tv_usec));
     double secondes = segments[(seq-1)%buff_size].last_ACK_recv_time.tv_sec - segments[(seq-1)%buff_size].trans_time.tv_sec;
     double millisecondes = abs(segments[(seq-1)%buff_size].last_ACK_recv_time.tv_usec - segments[(seq-1)%buff_size].trans_time.tv_usec);
-    return (secondes*1000000+millisecondes);
+    return (secondes*1000+millisecondes);
 }
 
 double maj_timer(struct segment segments[], int seq){
     timer = alpha*timer+(1-alpha)*calcul_rtt(segments,seq);
     if((int)timer<0){
-        printf("error, timer négatif \n");
-        printf("Case n°%d du tableau pour le segment n°%d\n",(seq-1)%buff_size,seq);
-        printf("Trans : %f secondes et  %f millisecondes  \n",(double)segments[(seq-1)%buff_size].trans_time.tv_sec,(double)segments[(seq-1)%buff_size].trans_time.tv_usec);
-        printf("Last Recv : %f secondes et  %f millisecondes  \n",(double)segments[(seq-1)%buff_size].last_ACK_recv_time.tv_sec,(double)segments[(seq-1)%buff_size].last_ACK_recv_time.tv_usec);
-        exit(0);
+            printf("error, timer négatif \n");
+            exit(0);
     }
     if(rto_enable){
         rto = 2*timer; 
@@ -187,12 +184,13 @@ void handle_DACK(struct segment segments[]){
     // Le délai de retransmission pour un segment donné est doublé après chaque retransmission de ce segment.
     seq = nv_ack+1; // on décale la fenêtre au segment suivant l'ACK dupliqué 
     //printf("DUPLICATE ACK retransmission à partir de : %d\n",seq);
+    lost_seg ++;
     ssthresh = flightsize/2;
     // *window_size = WINDOW;
     if(fast_retransmit){
         //printf("FAST RETRANSMIT\n");
         //flightsize = cwnd; // on suppose que cwnd est forcément < rwnd, normalement il faut faire min(rwnd,cwnd) mais on ne connaît pas rwnd
-        cwnd = WINDOW;
+        cwnd = 1;
         window_size = cwnd;
         congestion_avoidance = 0; // on repasse en SLOW START
     }
@@ -204,7 +202,7 @@ void handle_DACK(struct segment segments[]){
         congestion_avoidance = 1; // on passe directement en CONGESTION AVOIDANCE
     }else{	
         //printf("SLOW START => CONGESTION AVOIDANCE\n");
-        cwnd = WINDOW;    
+        cwnd = 1;    
         window_size = cwnd;
         congestion_avoidance = 1;   
     }
@@ -309,7 +307,6 @@ void handle_ACK(struct segment segments[]){
     // si pas dans l'ordre, donc inférieur au plus grand reçu => pas de pb 
     // si duplicate alors => retransmission 
     if(segments[(nv_ack-1)%buff_size].nbr_ACK_recv >= 3){ // si on a reçu 3 fois ou plus le même ACK
-        lost_seg ++;
         handle_DACK(segments);
     }else if(segments[(nv_ack-1)%buff_size].nbr_ACK_recv > 1){ // si DUPLICATE ACK mais le 2e seulement
         //printf("1er DUPLICATE ACK \n");
@@ -329,7 +326,7 @@ void handle_timeout(){
     if(ssthresh==0){
         ssthresh = 2; // le seuil ne peut pas être à 0 ou à 1 
     }
-    cwnd = WINDOW;
+    cwnd = 1;
     congestion_avoidance = 1;    
     window_size = cwnd;
     lost_ack ++;
@@ -357,7 +354,7 @@ void recv_ACK(int data_socket, struct sockaddr_in data_addr, int len, struct seg
                 cwnd=ssthresh; // deflation de la fenêtre
                 cwnd = (ssthresh == 0) ? 1 : ssthresh;
         }
-        if(nv_ack>=max_ack && nv_ack!= 0){
+        if(nv_ack>=max_ack){
             handle_ACK(segments);
         }else{ // si on a bien reçu un ACK mais qui est dans le mauvais ordre 
             if(timer_set = 1){ // si notre fenêtre était à 0, alors on considère que le serveur n'a pas reçu d'ACK  
@@ -373,7 +370,6 @@ void init_segment(struct segment segments[], char str[], int retrans_seg){
     int index = (seq-1)%buff_size;
     // int found = 0;
     if(!retrans_seg){
-        
         if(segments[index].init!=1 || (segments[index+1].nbr_ACK_recv != 0 && seq>buff_size)){ //si on a jamais transmis ce segment ou si le suivant a été ACK (utile quand on est dans le cas d'un buffer circulaire)
             //found = 1;
             //printf("Case n°%d du tableau pour le segment n°%d contient : %s\n",index,seq,str);
@@ -396,7 +392,7 @@ void init_segment(struct segment segments[], char str[], int retrans_seg){
 }
 
 void wait_for_ACK(int data_socket, struct sockaddr_in data_addr, int len, struct segment segments[], FILE *fp){
-    int retval = 0;
+    int retval;
     fd_set read_fds;
     FD_ZERO(&read_fds); // création du set qui va contenir la socket
     FD_SET(data_socket, &read_fds); // met la socket de données dans le set
@@ -448,11 +444,8 @@ void send_segment(int data_socket, struct sockaddr_in data_addr, struct segment 
     if(rto_enable){
         gettimeofday(&current, NULL);
         timersub(&current, &segments[(seq-1)%buff_size].trans_time,&res);
-        //printf("Seconds = %d - %d, Millisecondes = %d - %d => Secondes = %d, ms = %d\n",(int)current.tv_sec,(int)segments[(seq-1)%buff_size].trans_time.tv_sec,(int)current.tv_usec,(int)segments[(seq-1)%buff_size].trans_time.tv_usec,(int)res.tv_sec,(int)res.tv_usec);
-        //printf("Wait %d milliseconds before sending segment n°%d\n",(int)(res.tv_sec*1000+res.tv_usec),seq);
-
     }
-    if( (rto_enable && segments[(seq-1)%buff_size].init==1 && (res.tv_sec*1000000+res.tv_usec)>rto) || (!rto_enable) || (segments[(seq-1)%buff_size].init!=1) ){
+    if( (rto_enable && segments[(seq-1)%buff_size].init==1 && (res.tv_sec*1000+res.tv_usec)>rto) || (!rto_enable) || (segments[(seq-1)%buff_size].init!=1) ){
         if(segments[(seq-1)%buff_size].init==1){ // si on a déjà transmis on prend les octets stockés en mémoire 
         memcpy(str,segments[(seq-1)%buff_size].bytes,segments[(seq-1)%buff_size].byte_length);
         res_read = segments[(seq-1)%buff_size].byte_length;
@@ -483,8 +476,7 @@ void send_segment(int data_socket, struct sockaddr_in data_addr, struct segment 
         seq++; 
         window_size --;
     }else{
-        //printf("Wait = %d - %d \n",(int)rto,(int)(res.tv_sec*1000000+res.tv_usec));
-        //printf("Wait %d milliseconds before sending segment n°%d\n",(int)rto-(int)(res.tv_sec*1000000+res.tv_usec),seq);
+        //printf("Wait %d milliseconds before sending segment n°%d\n",(int)(res.tv_sec*1000+res.tv_usec),seq);
     }
 }
 
@@ -568,25 +560,23 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
         //     exit(0);
         // }
     }
-    free(segments);
     char eof[4] = "FIN";
     sendto(data_socket, (const char *)eof, strlen(eof), MSG_CONFIRM, (const struct sockaddr *) &data_addr, sizeof(data_addr));
     fclose(fp);
     close(data_socket);
-    // printf("fichier de %d octets\n",(int)file_size);
-    // printf("%d octets lus et %d octets envoyés\n",(int)nbre_octets,res_sent);
-    // printf("%d segments perdus sur %d initiaux\n",(int)lost_seg,(int)nbre_seg);
-    // printf("%d ACK perdus\n",(int)lost_ack);
+    printf("fichier de %d octets\n",(int)file_size);
+    printf("%d octets lus et %d octets envoyés\n",(int)nbre_octets,res_sent);
+    printf("%d segments perdus sur %d initiaux\n",(int)lost_seg,(int)nbre_seg);
+    printf("%d ACK perdus\n",(int)lost_ack);
     //segments_print(segments);
     return 1;
 }
 
 
 int twh_serv(int sockfd, struct sockaddr_in cliaddr){
-    // printf("nv twh\n");
+    //printf("nv twh\n");
     int len, n;
     char buffer[4];
-    bzero(buffer,sizeof(buffer));
 	len = sizeof(cliaddr);//taille de la structure qui mène vers le client
     n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
 	buffer[n] = '\0';
@@ -619,21 +609,14 @@ int twh_serv(int sockfd, struct sockaddr_in cliaddr){
 }
 
 int main(int argc, char **argv) {
-    //printf("Début main \n");
+
     int public_port;
-    int alpha;
+
     if(argc >= 2){
 		public_port = atoi(argv[1]);
 	}else{
 		public_port = PORT;
 	}
-
-    if(argc >= 3){
-		alpha = atoi(argv[2]);
-	}else{
-		alpha = 0.9;
-	}
-    
 
 	int sockfd;
 	struct sockaddr_in servaddr, cliaddr;
@@ -641,18 +624,14 @@ int main(int argc, char **argv) {
     createsocket(&sockfd,&servaddr,public_port);
 
     while(1){
-        reset_var(alpha);
-        //printf("Variable init\n");
+        reset_var();
         int res_twh = twh_serv(sockfd,cliaddr); // twh correspond au connect en TCP
-        //printf("res_twh\n");
+        //printf(res_twh);
         if(res_twh == 1){
-            //printf("twh successful \n");
-            //system("cmp bigfile.txt copy_bigfile.txt");
-            //exit(0);
-            break;
+            printf("twh successful \n");
+            system("cmp bigfile.txt copy_bigfile.txt");
         }
         // le fork est fait quand on fait la socket de données, le fils gère les données et le père acceptre les clients    
     }
-    //printf("Fin main \n");
 	return 0;
 }
