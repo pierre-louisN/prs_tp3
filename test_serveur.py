@@ -6,8 +6,8 @@ import time
 
 params = ["alpha"]
 
-vals = [[0,1,0.1]]
-moyenne = 10 # on va faire la moyenne sur 10 valeurs
+vals = [[0,1,0.01]]
+moyenne = 100 # on va faire la moyenne sur 10 valeurs
 
 def get_addr():
     hostname = socket.gethostname()
@@ -22,7 +22,8 @@ def call_serv(name,value):
     #output = subprocess.run(["./client1", "127.0.0.2", "8080", "bigfile.txt"], capture_output=True).stdout
     #output = subprocess.run(["./server"], timeout  = 10,capture_output=True).stdout
     #print(output)
-    subprocess.run(["./server"]) # pour avoir la sortie du programme : DEBUG
+    print("alpha = ",value)
+    subprocess.run(["./server","8080",str(float(value))]) # pour avoir la sortie du programme : DEBUG
 
 def launch_serv():
     #f = open("debit_client.txt", "w")
@@ -32,20 +33,21 @@ def launch_serv():
         y = vals[i][1]/vals[i][2]
         #print(y)
         
-        while(y>0):
+        while(y+1>0):
             moy = moyenne
             debit = 0
             while(moy>0): 
-                print("Version n° ",moy," du serveur n° ",y)
+                param = round(vals[i][1]-(y*vals[i][2]),4)
+                #print("Version n°",moy," du serveur n°",y)
                 #     debit = debit + call_client()
-                call_serv(params[i],y)
+
+                call_serv(params[i],param)
                 #call_client()
                 #time.sleep(0.5)
                 moy  = moy - 1
                 # debit = debit/moyenne
                 # params[i][y] = debit
             y = y-1
-            print("fin de la première boucle")
 
 
 if __name__ == '__main__':

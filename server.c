@@ -508,7 +508,7 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     // entrée dans la connexion 
     n = recvfrom(data_socket, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &data_addr, &len);
     buffer[n] = '\0'; 
-    printf("Client sent filename : %s\n", buffer);
+    //printf("Client sent filename : %s\n", buffer);
     FILE *fp;
     char str[SEGMENT_SIZE-NUMSEQ_SIZE]; // va contenir ce qu'on lit dans le fichier
     bzero(str,sizeof(str));
@@ -522,9 +522,9 @@ int exchange_file(int data_socket, struct sockaddr_in data_addr){
     struct stat st;
     stat(buffer, &st);
     size_t file_size = st.st_size;
-    printf("Taille du fichier : %d\n",(int)file_size);
+    //printf("Taille du fichier : %d\n",(int)file_size);
     nbre_seg = ceil((double)file_size/(double)(SEGMENT_SIZE-NUMSEQ_SIZE)); // on arrondi à l'entier supérieur pour connaître le nombre de segments nécessaires
-    printf("%d segments nécessaires\n",(int)nbre_seg);
+    //printf("%d segments nécessaires\n",(int)nbre_seg);
     if(nbre_seg>BUFFER_SIZE){
         printf("fichier trop grand \n");
         //exit(0);
@@ -590,7 +590,7 @@ int twh_serv(int sockfd, struct sockaddr_in cliaddr){
 	len = sizeof(cliaddr);//taille de la structure qui mène vers le client
     n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
 	buffer[n] = '\0';
-	printf("Client : %s\n", buffer);
+	//printf("Client : %s\n", buffer);
     if((strcmp(buffer,"SYN")) == 0){ //si le client s'est bien connecté alors on crée la socket de données
         memset( buffer, '\0', sizeof(char)*sizeof(buffer));
         int data_socket; //on va créer la socket de donnée
@@ -606,7 +606,7 @@ int twh_serv(int sockfd, struct sockaddr_in cliaddr){
         sendto(sockfd, (const char *)message, strlen(message), MSG_CONFIRM, (const struct sockaddr *) &cliaddr, len);
         n = recvfrom(sockfd, (char *)buffer, MAXLINE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
         buffer[n] = '\0'; 
-	    printf("Client : %s\n", buffer);
+	    //printf("Client : %s\n", buffer);
         if(strcmp(buffer,"ACK") == 0){
             int ex = exchange_file(data_socket,data_addr); 
             if(ex==1){
@@ -629,7 +629,8 @@ int main(int argc, char **argv) {
 	}
 
     if(argc >= 3){
-		alpha = atoi(argv[2]);
+        //printf("alpha = %f\n",atof(argv[2]));
+		alpha = atof(argv[2]);
 	}else{
 		alpha = 0.9;
 	}
