@@ -9,6 +9,7 @@ matplotlib.use('Agg') # no UI backend
 import matplotlib.pyplot as plt
 import numpy as np
 
+addr = ""
 params = ["alpha"]
 res = []
 vals = [[0,1,0.01]]
@@ -29,7 +30,7 @@ def call_client():
     #call(["./server"]) le serveur tourne en continu donc pas besoin de le lancer
     start = time.time()
     #output = subprocess.run(["./client1", "127.0.0.2", "8080", "bigfile.txt"], capture_output=True).stdout
-    output = subprocess.run(["./client1", "127.0.0.2", "8080", "bigfile.txt"], timeout = 10, capture_output=True).stdout
+    output = subprocess.run(["./client1", addr, "8080", "bigfile.txt"], timeout = 10, capture_output=True).stdout
     #output = subprocess.run(["./client1", "127.0.0.2", "8080", "fleur.jpg"], timeout=10,capture_output=True)
     #subprocess.call(["./client2", "127.0.0.2", "8080", "fleur.jpg"])
     end = time.time()
@@ -98,11 +99,12 @@ def plot_res():
 if __name__ == '__main__':
     print("Début main")
     #call_client()
-    # if len(sys.argv) <= 1:
-    #     print('no arguments passed')
-    #     nbre_clients = 10
-    # else :
-    #     nbre_clients = sys.argv[1]
+    if len(sys.argv) <= 1:
+        print('no arguments passed')
+        addr = "127.0.0.2"
+    else :
+        addr = sys.argv[1]
+    
     get_rate()
 
     plot_res()

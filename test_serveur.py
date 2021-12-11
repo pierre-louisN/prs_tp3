@@ -12,7 +12,6 @@ moyenne = 100 # on va faire la moyenne sur 10 valeurs
 def get_addr():
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
-
     print(local_ip)
 
 def call_serv(name,value):
